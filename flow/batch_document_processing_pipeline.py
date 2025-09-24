@@ -96,7 +96,7 @@ def filter_files_by_size(pdf_files: List[str], max_size_mb: float = 50.0) -> Lis
     return filtered_files
 
 @task(name="단일_문서_완전_처리")
-def process_single_document_complete(document_path: str, max_pages: int = None, skip_image_processing: bool = False) -> Dict[str, Any]:
+def process_single_document_complete(document_path: str, max_pages: int = None, skip_image_processing: bool = False, document_type: str = 'common') -> Dict[str, Any]:
     """단일 문서의 전체 처리 과정을 실행하는 태스크"""
     logger = get_run_logger()
     
@@ -122,7 +122,7 @@ def process_single_document_complete(document_path: str, max_pages: int = None, 
         job_id = None
         if db_initialized:
             try:
-                doc_metadata = create_document_metadata(document_path)
+                doc_metadata = create_document_metadata(document_path, document_type)
                 flow_run_context = get_run_context()
                 flow_run_id = str(flow_run_context.flow_run.id) if flow_run_context and flow_run_context.flow_run else "batch_run"
                 job_id = create_processing_job(doc_metadata["doc_id"], flow_run_id)

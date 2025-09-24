@@ -65,7 +65,7 @@ def initialize_database():
         return False
 
 @task(name="생성_문서_메타데이터")
-def create_document_metadata(document_path: str) -> Dict[str, Any]:
+def create_document_metadata(document_path: str, document_type: str = 'common') -> Dict[str, Any]:
     """문서 메타데이터 생성 및 저장"""
     logger = get_run_logger()
     
@@ -91,22 +91,47 @@ def create_document_metadata(document_path: str) -> Dict[str, Any]:
         
         # 데이터베이스에 저장
         with next(get_db_session()) as session:
-            # 기존 문서 확인 (해시 기반 + 완료된 문서만)
-            existing_doc = session.query(Document).filter_by(
+            # 1. 파일명 기반 기존 문서 확인
+            existing_docs = session.query(Document).filter_by(
+                document_name=doc_name,  # 파일명으로 검색
+                status="completed"
+            ).all()
+            
+            if existing_docs:
+                if document_type == 'common':
+                    # 일반 타입: 기존 문서들 삭제 표시 (is_deleted=True)
+                    logger.info(f"🗑️ 일반 타입 - 기존 문서 {len(existing_docs)}개 삭제 표시")
+                    for old_doc in existing_docs:
+                        old_doc.is_deleted = True
+                        old_doc.updated_at = datetime.utcnow()
+                        # 관련 청크들도 삭제 (실제로는 별도 함수로 분리 권장)
+                        session.query(DocumentChunk).filter_by(doc_id=old_doc.document_id).delete()
+                    session.commit()
+                elif document_type in ['type1', 'type2']:
+                    # 리비전 타입: 기존 문서 그대로 유지
+                    logger.info(f"📚 리비전 타입 - 기존 문서 {len(existing_docs)}개 유지하고 새 문서 추가")
+                    pass  # 기존 문서를 그대로 두고 새 문서 추가
+            
+            # 2. 해시 기반 동일 파일 체크 (기존 로직 유지)
+            existing_hash_doc = session.query(Document).filter_by(
                 file_hash=file_hash,
-                status="completed"  # 성공적으로 완료된 문서만 중복으로 처리
+                status="completed",
+                is_deleted=False  # 삭제되지 않은 문서만
             ).first()
-            if existing_doc:
-                logger.info(f"📋 완료된 기존 문서 발견: {existing_doc.document_id}")
+            if existing_hash_doc:
+                logger.info(f"📋 동일 파일 해시 발견: {existing_hash_doc.document_id}")
                 return {
-                    "doc_id": existing_doc.document_id,
+                    "doc_id": existing_hash_doc.document_id,
                     "document_path": str(file_path),
                     "document_name": doc_name,
                     "is_new": False
                 }
             
             # 실패한 기존 문서가 있는지 확인
-            failed_doc = session.query(Document).filter_by(file_hash=file_hash).first()
+            failed_doc = session.query(Document).filter_by(
+                file_hash=file_hash,
+                is_deleted=False
+            ).first()
             if failed_doc:
                 logger.info(f"🔄 실패한 기존 문서 발견, 재처리 시작: {failed_doc.document_id} (상태: {failed_doc.status})")
                 # 실패한 문서는 재처리를 위해 상태를 processing으로 변경
@@ -132,6 +157,7 @@ def create_document_metadata(document_path: str) -> Dict[str, Any]:
                 upload_path=str(file_path),
                 user_id="system",  # 시스템 처리용 기본값
                 is_public=False,
+                document_type=document_type,  # 문서 타입 설정
                 status="processing",
                 # 확장 필드들 (Optional)
                 file_hash=file_hash,
@@ -943,7 +969,7 @@ def comprehensive_search(query: str) -> Dict[str, Any]:
     description="4단계 문서 처리 파이프라인: 텍스트 추출 → 이미지 캡처 → GPT 설명 → Vector DB (분리된 API 버전)",
     task_runner=ConcurrentTaskRunner()
 )
-def document_processing_pipeline(document_path: str, skip_image_processing: bool = False, max_pages: int = None):
+def document_processing_pipeline(document_path: str, skip_image_processing: bool = False, max_pages: int = None, document_type: str = 'common'):
     """
     문서 처리 파이프라인 메인 함수
     
@@ -982,7 +1008,7 @@ def document_processing_pipeline(document_path: str, skip_image_processing: bool
             flow_run_context = get_run_context()
             flow_run_id = str(flow_run_context.flow_run.id) if flow_run_context and flow_run_context.flow_run else "unknown"
             
-            doc_metadata = create_document_metadata(document_path)
+            doc_metadata = create_document_metadata(document_path, document_type)
             job_id = create_processing_job(doc_metadata["doc_id"], flow_run_id)
             logger.info(f"📋 문서 ID: {doc_metadata['doc_id']}, 작업 ID: {job_id}")
         except Exception as e:
