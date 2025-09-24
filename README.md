@@ -1,5 +1,6 @@
 # 📄 Document Processing Pipeline with Prefect
 
+
 AI 기반 문서 처리 파이프라인입니다. PDF 문서에서 텍스트와 이미지를 추출하고, GPT Vision으로 이미지 설명을 생성한 후, 벡터 데이터베이스에 저장하여 검색 가능하도록 만드는 완전 자동화된 시스템입니다.
 
 ## 🚀 빠른 시작
